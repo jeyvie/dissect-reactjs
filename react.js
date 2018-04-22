@@ -18,6 +18,16 @@ ReactDOMTextComponent.prototype.mountComponent = function (rootID) {
     return '<span data-reactid="' + rootID + '">' + this._currentElement + '</span>';
 }
 
+ReactDOMTextComponent.prototype.receiveComponent = function (nextText) {
+    var nextStringText = '' + nextText;
+    //跟以前保存的字符串比较
+    if (nextStringText !== this._currentElement) {
+        this._currentElement = nextStringText;
+        //替换整个节点
+        $('[data-reactid="' + this._rootNodeID + '"]').html(this._currentElement);
+    }
+}
+
 
 //component工厂  用来返回一个component实例
 export const instantiateReactComponent = function (node) {

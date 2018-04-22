@@ -1,23 +1,27 @@
 
 import React from './react.js';
 
-const {createElement} = React;
+const { createElement } = React;
 
 
 var HelloMessage = React.createClass({
-  getInitialState: function() {
-    return {type: 'say:'};
+  getInitialState: function () {
+    return { type: 'say:' };
   },
-  componentWillMount: function() {
+  componentWillMount: function () {
     console.log('我就要开始渲染了。。。')
   },
-  componentDidMount: function() {
+  componentDidMount: function () {
     console.log('我已经渲染好了。。。')
   },
-  render: function() {
+  changeType: function () {
+    this.setState({ type: 'shout:' })
+  },
+  render: function () {
     return React.createElement(
-      "div", null, 
-      this.state.type, 
+      "div",
+      { onclick: this.changeType.bind(this) },
+      this.state.type,
       "Hello ",
       this.props.name
     );

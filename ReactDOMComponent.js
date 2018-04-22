@@ -1,5 +1,5 @@
-import {instantiateReactComponent} from './react.js'
-
+import { instantiateReactComponent } from './react.js'
+import {_shouldUpdateReactComponent} from './ReactCompositeComponent.js'
 
 /**
  * component类，用来表示文本在渲染，更新，删除时应该做些什么事情
@@ -10,7 +10,7 @@ import {instantiateReactComponent} from './react.js'
  *          props: ''
  *        }
  */
-function ReactDOMComponent(element){
+function ReactDOMComponent(element) {
     //存下当前的element对象引用
     this._currentElement = element;
     this._rootNodeID = null;
@@ -18,7 +18,7 @@ function ReactDOMComponent(element){
 
 //component渲染时生成的dom结构
 // 会递归渲染子元素
-ReactDOMComponent.prototype.mountComponent = function(rootID){
+ReactDOMComponent.prototype.mountComponent = function (rootID) {
     //赋值标识
     this._rootNodeID = rootID;
     var props = this._currentElement.props;
@@ -50,15 +50,15 @@ ReactDOMComponent.prototype.mountComponent = function(rootID){
 
     var childrenInstances = []; //用于保存所有的子节点的componet实例，以后会用到
     var that = this;
-    $.each(children, function(key, child) {
+    $.each(children, function (key, child) {
         //这里再次调用了instantiateReactComponent实例化子节点component类，拼接好返回
         var childComponentInstance = instantiateReactComponent(child);
-        
+
         // 记录的是子元素的顺序？
         childComponentInstance._mountIndex = key;
 
         childrenInstances.push(childComponentInstance);
-        
+
         //子节点的rootId是父节点的rootId加上新的key也就是顺序的值拼成的新值
         var curRootId = that._rootNodeID + '.' + key;
         //得到子节点的渲染内容
@@ -74,6 +74,288 @@ ReactDOMComponent.prototype.mountComponent = function(rootID){
     //拼出整个html内容
     return tagOpen + '>' + content + tagClose;
 }
+
+ReactDOMComponent.prototype.receiveComponent = function (nextElement) {
+    var lastProps = this._currentElement.props;
+    var nextProps = nextElement.props;
+
+    this._currentElement = nextElement;
+    //需要单独的更新属性
+    this._updateDOMProperties(lastProps, nextProps);
+    //再更新子节点
+    this._updateDOMChildren(nextElement.props.children);
+}
+
+
+/* 
+    属性的变更并不是特别复杂，
+    主要就是找到以前老的不用的属性直接去掉，
+    新的属性赋值，并且注意其中特殊的事件属性做出特殊处理就行了
+*/
+
+ReactDOMComponent.prototype._updateDOMProperties = function (lastProps, nextProps) {
+    var propKey;
+    //遍历，当一个老的属性不在新的属性集合里时，需要删除掉。
+
+    for (propKey in lastProps) {
+        //新的属性里有，或者propKey是在原型上的直接跳过。这样剩下的都是不在新属性集合里的。需要删除
+        if (nextProps.hasOwnProperty(propKey) || !lastProps.hasOwnProperty(propKey)) {
+            continue;
+        }
+        //对于那种特殊的，比如这里的事件监听的属性我们需要去掉监听
+        if (/^on[A-Za-z]/.test(propKey)) {
+            var eventType = propKey.replace('on', '');
+            //针对当前的节点取消事件代理
+            $(document).undelegate('[data-reactid="' + this._rootNodeID + '"]', eventType, lastProps[propKey]);
+            continue;
+        }
+
+        //从dom上删除不需要的属性
+        $('[data-reactid="' + this._rootNodeID + '"]').removeAttr(propKey)
+    }
+
+    //对于新的属性，需要写到dom节点上
+    for (propKey in nextProps) {
+        //对于事件监听的属性我们需要特殊处理
+        if (/^on[A-Za-z]/.test(propKey)) {
+            var eventType = propKey.replace('on', '');
+            //以前如果已经有，说明有了监听，需要先去掉
+            lastProps[propKey] && $(document).undelegate('[data-reactid="' + this._rootNodeID + '"]', eventType, lastProps[propKey]);
+            //针对当前的节点添加事件代理,以_rootNodeID为命名空间
+            $(document).delegate('[data-reactid="' + this._rootNodeID + '"]', eventType + '.' + this._rootNodeID, nextProps[propKey]);
+            continue;
+        }
+
+        if (propKey == 'children') continue;
+
+        //添加新的属性，或者是更新老的同名属性
+        $('[data-reactid="' + this._rootNodeID + '"]').prop(propKey, nextProps[propKey])
+    }
+
+}
+
+//全局的更新深度标识
+var updateDepth = 0;
+//全局的更新队列，所有的差异都存在这里
+var diffQueue = [];
+
+/* 
+更新子节点包含两个部分，
+    一个是递归的分析差异，把差异添加到队列中。
+    然后在合适的时机调用_patch把差异应用到dom上。
+*/
+
+ReactDOMComponent.prototype._updateDOMChildren = function (nextChildrenElements) {
+    updateDepth++
+    //_diff用来递归找出差别,组装差异对象,添加到更新队列diffQueue。
+    this._diff(diffQueue, nextChildrenElements);
+    updateDepth--
+    if (updateDepth == 0) {
+        //在需要的时候调用patch，执行具体的dom操作
+        this._patch(diffQueue);
+        diffQueue = [];
+    }
+}
+
+//差异更新的几种类型
+var UPATE_TYPES = {
+    MOVE_EXISTING: 1,
+    REMOVE_NODE: 2,
+    INSERT_MARKUP: 3
+}
+
+/*  
+
+    普通的children是一个数组，此方法把它转换成一个map, key就是element的key,
+    如果是text节点或者element创建时并没有传入key,
+    就直接用在数组里的index标识
+
+*/
+function flattenChildren(componentChildren) {
+    var child;
+    var name;
+    var childrenMap = {};
+    for (var i = 0; i < componentChildren.length; i++) {
+        child = componentChildren[i];
+        name = child && child._currentelement && child._currentelement.key ? child._currentelement.key : i.toString(36);
+        childrenMap[name] = child;
+    }
+    return childrenMap;
+}
+
+
+//主要用来生成子节点elements的component集合
+//这边注意，有个判断逻辑，如果发现是更新，就会继续使用以前的componentInstance,调用对应的receiveComponent。
+//如果是新的节点，就会重新生成一个新的componentInstance，
+function generateComponentChildren(prevChildren, nextChildrenElements) {
+    var nextChildren = {};
+    nextChildrenElements = nextChildrenElements || [];
+    $.each(nextChildrenElements, function (index, element) {
+        var name = element.key ? element.key : index;
+        var prevChild = prevChildren && prevChildren[name];
+        var prevElement = prevChild && prevChild._currentElement;
+        var nextElement = element;
+
+        //调用_shouldUpdateReactComponent判断是否是更新
+        if (_shouldUpdateReactComponent(prevElement, nextElement)) {
+            //更新的话直接递归调用子节点的receiveComponent就好了
+            prevChild.receiveComponent(nextElement);
+            //然后继续使用老的component
+            nextChildren[name] = prevChild;
+        } else {
+            //对于没有老的，那就重新新增一个，重新生成一个component
+            var nextChildInstance = instantiateReactComponent(nextElement, null);
+            //使用新的component
+            nextChildren[name] = nextChildInstance;
+        }
+    })
+
+    return nextChildren;
+}
+
+//_diff用来递归找出差别,组装差异对象,添加到更新队列diffQueue。
+ReactDOMComponent.prototype._diff = function (diffQueue, nextChildrenElements) {
+    var self = this;
+    //拿到之前的子节点的 component类型对象的集合,这个是在刚开始渲染时赋值的，记不得的可以翻上面
+    //_renderedChildren 本来是数组，我们搞成map
+    var prevChildren = flattenChildren(self._renderedChildren);
+    //生成新的子节点的component对象集合，这里注意，会复用老的component对象
+    var nextChildren = generateComponentChildren(prevChildren, nextChildrenElements);
+    //重新赋值_renderedChildren，使用最新的。
+    self._renderedChildren = []
+    $.each(nextChildren, function (key, instance) {
+        self._renderedChildren.push(instance);
+    })
+
+
+    var nextIndex = 0; //代表到达的新的节点的index
+    //通过对比两个集合的差异，组装差异节点添加到队列中
+    for (name in nextChildren) {
+        if (!nextChildren.hasOwnProperty(name)) {
+            continue;
+        }
+        var prevChild = prevChildren && prevChildren[name];
+        var nextChild = nextChildren[name];
+        //相同的话，说明是使用的同一个component,所以我们需要做移动的操作
+        if (prevChild === nextChild) {
+            //添加差异对象，类型：MOVE_EXISTING
+            diffQueue.push({
+                parentId: self._rootNodeID,
+                parentNode: $('[data-reactid=' + self._rootNodeID + ']'),
+                type: UPATE_TYPES.MOVE_EXISTING,
+                fromIndex: prevChild._mountIndex,
+                toIndex: nextIndex
+            })
+        } else { //如果不相同，说明是新增加的节点
+            //但是如果老的还存在，就是element不同，但是component一样。我们需要把它对应的老的element删除。
+            if (prevChild) {
+                //添加差异对象，类型：REMOVE_NODE
+                diffQueue.push({
+                    parentId: self._rootNodeID,
+                    parentNode: $('[data-reactid=' + self._rootNodeID + ']'),
+                    type: UPATE_TYPES.REMOVE_NODE,
+                    fromIndex: prevChild._mountIndex,
+                    toIndex: null
+                })
+
+                //如果以前已经渲染过了，记得先去掉以前所有的事件监听，通过命名空间全部清空
+                if (prevChild._rootNodeID) {
+                    $(document).undelegate('.' + prevChild._rootNodeID);
+                }
+
+            }
+            //新增加的节点，也组装差异对象放到队列里
+            //添加差异对象，类型：INSERT_MARKUP
+            diffQueue.push({
+                parentId: self._rootNodeID,
+                parentNode: $('[data-reactid=' + self._rootNodeID + ']'),
+                type: UPATE_TYPES.INSERT_MARKUP,
+                fromIndex: null,
+                toIndex: nextIndex,
+                markup: nextChild.mountComponent() //新增的节点，多一个此属性，表示新节点的dom内容
+            })
+        }
+        //更新mount的index
+        nextChild._mountIndex = nextIndex;
+        nextIndex++;
+    }
+
+
+
+    //对于老的节点里有，新的节点里没有的那些，也全都删除掉
+    for (name in prevChildren) {
+        if (prevChildren.hasOwnProperty(name) && !(nextChildren && nextChildren.hasOwnProperty(name))) {
+            //添加差异对象，类型：REMOVE_NODE
+            diffQueue.push({
+                parentId: self._rootNodeID,
+                parentNode: $('[data-reactid=' + self._rootNodeID + ']'),
+                type: UPATE_TYPES.REMOVE_NODE,
+                fromIndex: prevChild._mountIndex,
+                toIndex: null
+            })
+            //如果以前已经渲染过了，记得先去掉以前所有的事件监听
+            if (prevChildren[name]._rootNodeID) {
+                $(document).undelegate('.' + prevChildren[name]._rootNodeID);
+            }
+        }
+    }
+}
+
+//用于将childNode插入到指定位置
+function insertChildAt(parentNode, childNode, index) {
+    var beforeChild = parentNode.children().get(index);
+    beforeChild ? childNode.insertBefore(beforeChild) : childNode.appendTo(parentNode);
+}
+
+ReactDOMComponent.prototype._patch = function (updates) {
+    var update;
+    var initialChildren = {};
+    var deleteChildren = [];
+    for (var i = 0; i < updates.length; i++) {
+        update = updates[i];
+        if (update.type === UPATE_TYPES.MOVE_EXISTING || update.type === UPATE_TYPES.REMOVE_NODE) {
+            var updatedIndex = update.fromIndex;
+            var updatedChild = $(update.parentNode.children().get(updatedIndex));
+            var parentID = update.parentID;
+
+            //所有需要更新的节点都保存下来，方便后面使用
+            initialChildren[parentID] = initialChildren[parentID] || [];
+            //使用parentID作为简易命名空间
+            initialChildren[parentID][updatedIndex] = updatedChild;
+
+
+            //所有需要修改的节点先删除,对于move的，后面再重新插入到正确的位置即可
+            deleteChildren.push(updatedChild)
+        }
+
+    }
+
+    //删除所有需要先删除的
+    $.each(deleteChildren, function (index, child) {
+        $(child).remove();
+    })
+
+
+    //再遍历一次，这次处理新增的节点，还有修改的节点这里也要重新插入
+    for (var k = 0; k < updates.length; k++) {
+        update = updates[k];
+        switch (update.type) {
+            case UPATE_TYPES.INSERT_MARKUP:
+                insertChildAt(update.parentNode, $(update.markup), update.toIndex);
+                break;
+            case UPATE_TYPES.MOVE_EXISTING:
+                insertChildAt(update.parentNode, initialChildren[update.parentID][update.fromIndex], update.toIndex);
+                break;
+            case UPATE_TYPES.REMOVE_NODE:
+                // 什么都不需要做，因为上面已经帮忙删除掉了
+                break;
+        }
+    }
+}
+
+
+
+
 
 
 export default ReactDOMComponent;

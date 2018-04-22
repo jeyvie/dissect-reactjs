@@ -4,6 +4,13 @@ var ReactClass = function () {
 //留给子类去继承覆盖
 ReactClass.prototype.render = function () { }
 
+ReactClass.prototype.setState = function (newState) {
+
+    //还记得我们在ReactCompositeComponent里面mount的时候 做了赋值
+    //所以这里可以拿到 对应的ReactCompositeComponent的实例_reactInternalInstance
+    this._reactInternalInstance.receiveComponent(null, newState);
+}
+
 
 export default ReactClass;
 
