@@ -1,4 +1,5 @@
 import ReactElement from './createElement.js'
+import ReactDOMComponent from './ReactDOMComponent.js'
 
 //component类，用来表示文本在渲染，更新，删除时应该做些什么事情
 function ReactDOMTextComponent(text) {
@@ -16,12 +17,21 @@ ReactDOMTextComponent.prototype.mountComponent = function (rootID) {
 
 
 //component工厂  用来返回一个component实例
-function instantiateReactComponent(node) {
+export const instantiateReactComponent = function (node) {
     //文本节点的情况
     if (typeof node === 'string' || typeof node === 'number') {
         return new ReactDOMTextComponent(node)
     }
+
+    //浏览器默认节点的情况
+    if (typeof node === 'object' && typeof node.type === 'string') {
+        //注意这里，使用了一种新的component
+        return new ReactDOMComponent(node);
+    }
 }
+
+
+
 
 
 const React = {
@@ -31,10 +41,10 @@ const React = {
     最终返回一个ReactElement实例对象也就是我们说的虚拟元素的实例
     */
     createElement: function (type, config, children) {
-        
+
         var props = {}, propName;
         config = config || {}
-        
+
         //看有没有key，用来标识element的类型，方便以后高效的更新，这里可以先不管
         var key = config.key || null;
 
