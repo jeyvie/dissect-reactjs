@@ -1,5 +1,5 @@
 import { instantiateReactComponent } from './react.js'
-import {_shouldUpdateReactComponent} from './ReactCompositeComponent.js'
+import { _shouldUpdateReactComponent } from './ReactCompositeComponent.js'
 
 /**
  * component类，用来表示文本在渲染，更新，删除时应该做些什么事情
@@ -157,6 +157,8 @@ ReactDOMComponent.prototype._updateDOMChildren = function (nextChildrenElements)
     }
 }
 
+
+
 //差异更新的几种类型
 var UPATE_TYPES = {
     MOVE_EXISTING: 1,
@@ -204,7 +206,7 @@ function generateComponentChildren(prevChildren, nextChildrenElements) {
             nextChildren[name] = prevChild;
         } else {
             //对于没有老的，那就重新新增一个，重新生成一个component
-            var nextChildInstance = instantiateReactComponent(nextElement, null);
+            var nextChildInstance = instantiateReactComponent(nextElement, null/* 干嘛的 */);
             //使用新的component
             nextChildren[name] = nextChildInstance;
         }
@@ -230,7 +232,7 @@ ReactDOMComponent.prototype._diff = function (diffQueue, nextChildrenElements) {
 
     var nextIndex = 0; //代表到达的新的节点的index
     //通过对比两个集合的差异，组装差异节点添加到队列中
-    for (name in nextChildren) {
+    for (name in nextChildren) { // for - in 不是无序的吗
         if (!nextChildren.hasOwnProperty(name)) {
             continue;
         }
@@ -311,6 +313,9 @@ ReactDOMComponent.prototype._patch = function (updates) {
     var update;
     var initialChildren = {};
     var deleteChildren = [];
+
+
+    // 找到需要移动和删除的
     for (var i = 0; i < updates.length; i++) {
         update = updates[i];
         if (update.type === UPATE_TYPES.MOVE_EXISTING || update.type === UPATE_TYPES.REMOVE_NODE) {
@@ -335,6 +340,16 @@ ReactDOMComponent.prototype._patch = function (updates) {
         $(child).remove();
     })
 
+    /* 
+        两次遍历是因为
+
+        删除和移动，都需要获取之前的DOM元素
+        不同的是删除获取后，然后清除掉
+        移动，是获取后，插入另一个位置
+
+        这里是把删除和移动的都清除了，
+        然后把更新的在插入DOM里
+    */
 
     //再遍历一次，这次处理新增的节点，还有修改的节点这里也要重新插入
     for (var k = 0; k < updates.length; k++) {

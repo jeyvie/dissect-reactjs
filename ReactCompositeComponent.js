@@ -2,11 +2,19 @@ import { instantiateReactComponent } from './react.js'
 
 function ReactCompositeComponent(element) {
     //存放元素element对象
+    /* 
+        type, props, children 的描述对象
+    */
     this._currentElement = element;
     //存放唯一标识
     this._rootNodeID = null;
     //存放对应的ReactClass的实例
     this._instance = null;
+
+    /* 
+    实例化后的组件
+    this._renderedComponent 
+    */
 }
 
 //用于返回当前自定义元素渲染时应该返回的内容
@@ -53,7 +61,9 @@ export const _shouldUpdateReactComponent = function(prevElement, nextElement) {
         if (prevType === 'string' || prevType === 'number') {
             return nextType === 'string' || nextType === 'number';
         } else {
-            return nextType === 'object' && prevElement.type === nextElement.type && prevElement.key === nextElement.key;
+            return nextType === 'object' 
+            && prevElement.type === nextElement.type 
+            && prevElement.key === nextElement.key;
         }
     }
     return false;
@@ -98,10 +108,14 @@ ReactCompositeComponent.prototype.receiveComponent = function (nextElement, newS
         inst.componentDidUpdate && inst.componentDidUpdate();
 
     } else {
+
+        // 走这条路的话， componentWillUpdate  之后，就没有 componentDidUpdate 了
+
+
         //如果发现完全是不同的两种element，那就干脆重新渲染了
         var thisID = this._rootNodeID;
         //重新new一个对应的component，
-        this._renderedComponent = this._instantiateReactComponent(nextRenderedElement);
+        this._renderedComponent = instantiateReactComponent(nextRenderedElement);
         //重新生成对应的元素内容
         var nextMarkup = _renderedComponent.mountComponent(thisID);
         //替换整个节点
